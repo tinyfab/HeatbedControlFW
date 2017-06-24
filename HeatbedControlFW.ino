@@ -32,6 +32,7 @@
 #define SETTING_ENCODER_BTN_PIN   (A1)
 
 //SEGMENT DISPLAY SETTING
+#define SETTING_7SEG_BRIGHTNESS  (15)
 #define SETTING_7SEG_NUM_DIG     (3)
 #define SETTING_7SEG_DIG_1_PIN   (10)
 #define SETTING_7SEG_DIG_2_PIN   (A4)
@@ -84,8 +85,8 @@
 #define ENC_BTN_RELEASED            (3)
 #define ENC_BTN_CLICKED             (4)
 #define ENC_BTN_DOUBLE_CLICKED      (5)
-#define ENC_UP                      (6)
-#define ENC_DOWN                    (7)
+#define ENC_CW                      (6)
+#define ENC_CCW                    (7)
 
 #define HEAT_STATE_UPPER_HYS        (1)
 #define HEAT_STATE_LOWER_HYS        (0)
@@ -116,6 +117,7 @@
 /////
 char TXT_OFF[]  = "OFF";
 char TXT_ON[]  = " ON";
+char TXT_DISABLE[]  = "---";
 char TXT_FAB[]  = "FAB";
 
 ////////////////////////////////////////////////
@@ -163,11 +165,11 @@ uint8_t encoderHandler(void)
 
   if (encoderValue == 1 )
   {
-    retVal = ENC_UP;
+    retVal = ENC_CW;
   }
   else if (encoderValue == -1)
   {
-    retVal = ENC_DOWN;
+    retVal = ENC_CCW;
   }
   else
   {
@@ -423,9 +425,9 @@ void setup(void) {
   byte numDigits = SETTING_7SEG_NUM_DIG;
   byte digitPins[] = {SETTING_7SEG_DIG_1_PIN, SETTING_7SEG_DIG_2_PIN, SETTING_7SEG_DIG_3_PIN};
   byte segmentPins[] = {SETTING_7SEG_A_PIN, SETTING_7SEG_B_PIN, SETTING_7SEG_C_PIN, SETTING_7SEG_D_PIN, SETTING_7SEG_E_PIN, SETTING_7SEG_F_PIN, SETTING_7SEG_G_PIN, SETTING_7SEG_H_PIN};
-  bool resistorsOnSegments = true; // 'false' means resistors are on digit pins
+  bool resistorsOnSegments = false; // 'false' means resistors are on digit pins
   byte hardwareConfig = COMMON_ANODE; // See README.md for options
-  bool updateWithDelays = false; // Default. Recommended
+  bool updateWithDelays = true; // Default. Recommended
   bool leadingZeros = false; // Use 'true' if you'd like to keep the leading zeros
   Serial.begin(19200);
   float f;
@@ -456,7 +458,7 @@ void setup(void) {
 
   //7seg
   sevseg.begin(hardwareConfig, numDigits, digitPins, segmentPins, resistorsOnSegments, updateWithDelays, leadingZeros);
-  sevseg.setBrightness(90);
+  sevseg.setBrightness(SETTING_7SEG_BRIGHTNESS);
 
   //heat
   pinMode(SETTING_HEATER_PIN, OUTPUT);
@@ -500,6 +502,7 @@ void loop(void) {
           if (millis() > 2000)
           {
             Serial.print("state: STATE_INIT -> STATE_OFF\n");
+            reset_IdleTimeout();
             sysState = STATE_OFF;
           }
         }
@@ -539,6 +542,7 @@ void loop(void) {
         if (errFlag == 0)
         {
           Serial.print("state: STATE_INIT -> STATE_OFF\n");
+          reset_IdleTimeout();
           sysState = STATE_OFF;
         }
 
@@ -551,8 +555,24 @@ void loop(void) {
         heaterEnable = false;
         switch (encoderFlag)
         {
-          case ENC_UP:
-          case ENC_DOWN:
+          case ENC_CW:
+            //            {
+            //              if (sleep == true)
+            //              {
+            //                sleep = false;
+            //              }
+            //              else
+            //              {
+            //                heaterState = HEAT_STATE_LOWER_HYS;
+            //                sysState = STATE_RUN_TEMP;
+            //                Serial.print("state: STATE_OFF -> STATE_RUN_TEMP\n");
+            //              }
+            //            }
+            break;
+          case ENC_CCW:
+            break;
+
+          case ENC_BTN_CLICKED:
             {
               if (sleep == true)
               {
@@ -569,22 +589,8 @@ void loop(void) {
                   tempSetTemp = setTemp;
                 }
                 sysState = STATE_SET_TEMP;
+                blinkTimeout = 0;
                 Serial.print("state: STATE_OFF -> STATE_SET_TEMP\n");
-              }
-            }
-            break;
-
-          case ENC_BTN_CLICKED:
-            {
-              if (sleep == true)
-              {
-                sleep = false;
-              }
-              else
-              {
-                heaterState = HEAT_STATE_LOWER_HYS;
-                sysState = STATE_RUN_TEMP;
-                Serial.print("state: STATE_OFF -> STATE_RUN_TEMP\n");
               }
             }
             break;
@@ -600,8 +606,6 @@ void loop(void) {
               {
                 if (blinkTimeout < millis())
                 {
-                  blinkTimeout = millis() + SETTING_7SEG_BLINK_TIME2S;
-                  blinkState++;
                   if (blinkState & 1)
                   {
                     sevseg.setChars(TXT_OFF);
@@ -617,6 +621,8 @@ void loop(void) {
                       sevseg.setNumber(curTemp, 1);
                     }
                   }
+                  blinkTimeout = millis() + SETTING_7SEG_BLINK_TIME2S;
+                  blinkState++;
                 }
               }
             }
@@ -631,8 +637,18 @@ void loop(void) {
         heaterEnable = true;
         switch (encoderFlag)
         {
-          case ENC_UP:
-          case ENC_DOWN:
+          case ENC_CW:
+            {
+              Serial.print("state: STATE_SET_TIMER -> STATE_RUN_TIMER\n");
+              sysState = STATE_RUN_TIMER;
+            }
+            break;
+
+          case ENC_CCW:
+
+            break;
+
+          case ENC_BTN_CLICKED:
             //set temp
             {
               if (setTemp == 0)
@@ -648,16 +664,10 @@ void loop(void) {
             }
             break;
 
-          case ENC_BTN_CLICKED:
-            {
-              Serial.print("state: STATE_SET_TIMER -> STATE_RUN_TIMER\n");
-              sysState = STATE_RUN_TIMER;
-            }
-            break;
-
           case ENC_BTN_HELD:
             {
               sysState = STATE_OFF;
+              reset_IdleTimeout();
               Serial.print("state: STATE_RUN_TEMP -> STATE_OFF\n");
             }
             break;
@@ -682,22 +692,28 @@ void loop(void) {
         heaterEnable = true;
         switch (encoderFlag)
         {
-          case ENC_BTN_CLICKED:
+          case ENC_CCW:
             {
               Serial.print("state: STATE_RUN_TIMER -> STATE_RUN_TEMP\n");
               sysState = STATE_RUN_TEMP;
             }
             break;
 
-          case ENC_BTN_HELD:
+          case ENC_CW:
             {
-              sysState = STATE_OFF;
-              Serial.print("state: STATE_RUN_TEMP -> STATE_OFF\n");
+
             }
             break;
 
-          case ENC_UP:
-          case ENC_DOWN:
+          case ENC_BTN_HELD:
+            {
+              sysState = STATE_OFF;
+              reset_IdleTimeout();
+              Serial.print("state: STATE_RUN_TIMER -> STATE_OFF\n");
+            }
+            break;
+
+          case ENC_BTN_CLICKED:
             //timer mode
             {
               uint32_t tempTime = millis();
@@ -760,8 +776,8 @@ void loop(void) {
 
         switch (encoderFlag)
         {
-          case ENC_UP:
-          case ENC_DOWN:
+          case ENC_CW:
+          case ENC_CCW:
             {
               tempSetTemp += encoderValue;
               if (tempSetTemp > SETTING_MAX_TEMP)
@@ -781,6 +797,7 @@ void loop(void) {
                 sprintf(dispTXT, "%02dc", tempSetTemp);
               }
               sevseg.setChars(dispTXT);
+              blinkTimeout = millis() + SETTING_7SEG_BLINK_TIME;
             }
             break;
 
@@ -799,19 +816,23 @@ void loop(void) {
           case ENC_BTN_HELD:
             {
               sysState = STATE_OFF;
+              reset_IdleTimeout();
+              Serial.print("state: STATE_SET_TEMP -> STATE_OFF\n");
             }
             break;
 
           default:
-            if (tempSetTemp > 99)
             {
-              sprintf(dispTXT, "%03d", tempSetTemp);
+              if (tempSetTemp > 99)
+              {
+                sprintf(dispTXT, "%03d", tempSetTemp);
+              }
+              else
+              {
+                sprintf(dispTXT, "%02dc", tempSetTemp);
+              }
+              break;
             }
-            else
-            {
-              sprintf(dispTXT, "%02dc", tempSetTemp);
-            }
-            break;
         }
 
         if (blinkTimeout < millis())
@@ -830,33 +851,31 @@ void loop(void) {
 
         if (idleTimeout < millis())
         {
-          sysState = STATE_RUN_TEMP;
-          Serial.print("state: STATE_SET_TEMP(timeout) -> STATE_RUN_TEMP\n");
+          sysState = STATE_OFF;
+          reset_IdleTimeout();
+          Serial.print("state: STATE_SET_TEMP(timeout) -> STATE_OFF\n");
         }
       }
       break;
 
     case STATE_SET_TIMER:
       {
-        //turn off heat first (safety)
-        //        heaterEnable = false;
         switch (encoderFlag)
         {
-          case ENC_DOWN:
+          case ENC_CCW:
+            if (tempSetTime < MINUTES)
             {
-              if (tempSetTime < MINUTES)
-              {
-                tempSetTime = 0;
-                sevseg.setChars(TXT_ON);
-                break;
-              }
-            }//delibrate no break
-          case ENC_UP:
+              tempSetTime = 0;
+              sevseg.setChars(TXT_DISABLE);
+              blinkTimeout = millis() + SETTING_7SEG_BLINK_TIME;
+              break;
+            }
+          case ENC_CW:
             {
               //minute
               tempSetTime += (encoderValue * MINUTES);
-              //setTime in millisecond
               sevseg.setNumber(tempSetTime / MINUTES, 0);
+              blinkTimeout = millis() + SETTING_7SEG_BLINK_TIME;
             }
             break;
 
@@ -866,6 +885,14 @@ void loop(void) {
               setTime = tempSetTime;
               heatStartTime = millis();
               sysState = STATE_RUN_TIMER;
+            }
+            break;
+
+          case ENC_BTN_HELD:
+            {
+              sysState = STATE_OFF;
+              reset_IdleTimeout();
+              Serial.print("state: STATE_SET_TEMP -> STATE_OFF\n");
             }
             break;
 
@@ -881,7 +908,7 @@ void loop(void) {
           {
             if (tempSetTime < MINUTES)
             {
-              sevseg.setChars(TXT_ON);
+              sevseg.setChars(TXT_DISABLE);
             }
             else
             {

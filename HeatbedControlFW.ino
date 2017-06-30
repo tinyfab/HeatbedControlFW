@@ -107,7 +107,7 @@
 
 #define SECONDS (1000)
 #define MINUTES (60000)
-#define HOURS (360000)
+#define HOURS (3600000)
 
 //ERR
 #define ERR_FLAG_UNKNOWN  (0)
@@ -349,8 +349,8 @@ void heaterHandler(void)
     if (heaterEnable)
     {
       heaterPID.Compute();
-      Serial.print(heaterPWM);
-      Serial.print("\n");
+      //      Serial.print(heaterPWM);
+      //      Serial.print("\n");
       heaterOn();
       //      if (curTemp > setTemp)
       //      {
@@ -428,7 +428,7 @@ void setup(void) {
   bool resistorsOnSegments = false; // 'false' means resistors are on digit pins
   byte hardwareConfig = COMMON_ANODE; // See README.md for options
   bool updateWithDelays = true; // Default. Recommended
-  bool leadingZeros = false; // Use 'true' if you'd like to keep the leading zeros
+  bool leadingZeros = true; // Use 'true' if you'd like to keep the leading zeros
   Serial.begin(19200);
   float f;
 
@@ -471,6 +471,7 @@ void setup(void) {
   //  digitalWrite(SETTING_STATUS_PIN, LOW);
 
 }
+
 
 //main loop
 void loop(void) {
@@ -743,29 +744,44 @@ void loop(void) {
             {
               curTime = 0;
             }
-
+            //Serial.print(curTime);Serial.print("t\n");
             if (curTime == 0)
             {
               sevseg.setChars(TXT_ON);
             }
-            //            else if (curTime < MINUTES)
-            //            {
-            //              sevseg.setNumber((curTime / SECONDS), 2);
-            //            }
-            else if (curTime < MINUTES * 10) //9 min 60 sec
+            else if (curTime < MINUTES)
             {
-              sevseg.setNumber(((curTime / SECONDS) % 60) + ((curTime / SECONDS) / 60) * 100, 2);
+              sevseg.setNumber((curTime / SECONDS), -1);
             }
+//            else if (curTime < MINUTES * 10) //9 min 60 sec
+//            {
+//              sevseg.setNumber(((curTime / SECONDS) % 60) + ((curTime / SECONDS) / 60) * 100, 2);
+//            }
             else if (curTime < HOURS * 10) //9 hr 60 min
             {
-              sevseg.setNumber(((curTime / MINUTES) % 60) + ((curTime / MINUTES) / 60) * 100, 2);
+              if (blinkState & 1)
+              {
+                sevseg.setNumber(((curTime / MINUTES) % 60) + ((curTime / MINUTES) / 60) * 100, 2);
+              }
+              else
+              {
+                sevseg.setNumber(((curTime / MINUTES) % 60) + ((curTime / MINUTES) / 60) * 100, -1);
+              }
             }
             else
             {
-              sevseg.setNumber(curTime / MINUTES, 0);
+              sevseg.setNumber(curTime / MINUTES, -1);
             }
             break;
         }
+
+        if (blinkTimeout < millis())
+        {
+          blinkTimeout = millis() + SETTING_7SEG_BLINK_TIME;
+          blinkState++;
+
+        }
+
       }
       break;
 
@@ -874,14 +890,22 @@ void loop(void) {
             {
               //minute
               tempSetTime += (encoderValue * MINUTES);
-              sevseg.setNumber(tempSetTime / MINUTES, 0);
-              blinkTimeout = millis() + SETTING_7SEG_BLINK_TIME;
+              if (tempSetTime < MINUTES)
+              {
+                sevseg.setChars(TXT_DISABLE);
+              }
+              else if (tempSetTime < HOURS * 10) //9 hr 60 min
+              {
+                sevseg.setNumber(((tempSetTime / MINUTES) % 60) + ((tempSetTime / MINUTES) / 60) * 100, 2);
+              }              blinkTimeout = millis() + SETTING_7SEG_BLINK_TIME;
             }
             break;
 
           case ENC_BTN_CLICKED: //save and run
             {
               Serial.print("state: STATE_SET_TIMER -> STATE_RUN_TEMP\n");
+              tempSetTime/=MINUTES;
+              tempSetTime*=MINUTES;
               setTime = tempSetTime;
               heatStartTime = millis();
               sysState = STATE_RUN_TIMER;
@@ -910,9 +934,9 @@ void loop(void) {
             {
               sevseg.setChars(TXT_DISABLE);
             }
-            else
+            else if (tempSetTime < HOURS * 10) //9 hr 60 min
             {
-              sevseg.setNumber(tempSetTime / MINUTES, 0);
+              sevseg.setNumber(((tempSetTime / MINUTES) % 60) + ((tempSetTime / MINUTES) / 60) * 100, 2);
             }
           }
           else
@@ -923,9 +947,9 @@ void loop(void) {
 
         if (idleTimeout < millis())
         {
-          sysState = STATE_RUN_TEMP;
+          sysState = STATE_RUN_TIMER;
           heaterState = HEAT_STATE_LOWER_HYS;
-          Serial.print("state: STATE_SET_TIMER(timeout) -> STATE_RUN_TEMP\n");
+          Serial.print("state: STATE_SET_TIMER(timeout) -> STATE_RUN_TIMER\n");
         }
       }
       break;

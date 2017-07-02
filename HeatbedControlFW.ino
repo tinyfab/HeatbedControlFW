@@ -23,7 +23,13 @@
 #define FIRMWARE_VERSION_MINOR         0
 
 //EEPROM ADDRESS
-#define EEPROM_ADR_SETTEMP        0
+#define EEPROM_ADR_FWVERSION      0x00
+#define EEPROM_ADR_SETTEMP        0x04
+#define EEPROM_ADR_SETMODE        0x08
+#define EEPROM_ADR_PID_P          0x0C
+#define EEPROM_ADR_PID_I          0x10
+#define EEPROM_ADR_PID_D          0x14
+#define EEPROM_ADR_HYSTERESIS     0x18
 
 //ENCODER SETTING
 #define SETTING_ENCODER_STEP      (2)
@@ -71,6 +77,7 @@
 #define STATE_SET_TEMP              (4)
 #define STATE_SET_TIMER             (5)
 #define STATE_ERROR                 (6)
+#define STATE_SETTING               (7)
 
 
 //Temperature STATE
@@ -100,6 +107,15 @@
 
 //DEFAULT
 #define HYSTERESIS    (2) //degree
+#define PID_P     5
+#define PID_I     0.1
+#define PID_D     1
+
+
+
+//setting
+#define SET_MODE_PID        (0)
+#define SET_MODE_BITBANG    (1)
 
 //UNITS
 #define UNIT_CELSIUS    (0)
@@ -133,16 +149,17 @@ uint32_t heatStartTime;
 float curTemp; //current Temperature
 uint32_t curTime;
 int8_t encoderValue; //-1, 0, +1
-uint8_t setHysteresis;
-uint8_t setMode;
 uint32_t idleTimeout;
 uint8_t blinkState;
 uint32_t blinkTimeout;
 uint8_t errFlag;
 float heaterPWM;
-double kp = 5, ki = 0.1, kd = 1;
+float setting_mode = SET_MODE_PID;
+float setting_Hysteresis = HYSTERESIS;
+
+double setting_kp = PID_P, setting_ki = PID_I, setting_kd = PID_D;
 //Specify the links and initial tuning parameters
-PID heaterPID((double*)&curTemp, (double*)&heaterPWM, (double*)&setTemp, kp, ki, kd, P_ON_E, DIRECT); //P_ON_M specifies that Proportional on Measurement be used
+PID heaterPID((double*)&curTemp, (double*)&heaterPWM, (double*)&setTemp, setting_kp, setting_ki, setting_kd, P_ON_E, DIRECT); //P_ON_M specifies that Proportional on Measurement be used
 //P_ON_E (Proportional on Error
 
 ///////////////////////////////////////////////
@@ -303,7 +320,14 @@ void heaterOff(void)
 {
   digitalWrite(SETTING_HEATER_PIN, LOW);
   digitalWrite(SETTING_AUX_PIN, LOW);
-  analogWrite(SETTING_PWM_PIN, 0);
+  if (setting_mode == SET_MODE_PID)
+  {
+    analogWrite(SETTING_PWM_PIN, 0);
+  }
+  else
+  {
+    digitalWrite(SETTING_PWM_PIN, LOW);
+  }
   digitalWrite(SETTING_STATUS_PIN, LOW);
 }
 
@@ -311,7 +335,15 @@ void heaterOn(void)
 {
   digitalWrite(SETTING_HEATER_PIN, HIGH);
   digitalWrite(SETTING_AUX_PIN, HIGH);
-  analogWrite(SETTING_PWM_PIN, heaterPWM);
+  if (setting_mode == SET_MODE_PID)
+  {
+    analogWrite(SETTING_PWM_PIN, heaterPWM);
+  } 
+  else
+  {
+    digitalWrite(SETTING_PWM_PIN, HIGH);
+  }
+
   digitalWrite(SETTING_STATUS_PIN, HIGH);
 }
 
@@ -348,70 +380,76 @@ void heaterHandler(void)
   {
     if (heaterEnable)
     {
-      heaterPID.Compute();
-      //      Serial.print(heaterPWM);
-      //      Serial.print("\n");
-      heaterOn();
-      //      if (curTemp > setTemp)
-      //      {
-      //        heaterState = HEAT_STATE_UPPER_HYS;
-      //      }
-      //
-      //      if (curTemp < setTemp - HYSTERESIS)
-      //      {
-      //        heaterState = HEAT_STATE_LOWER_HYS;
-      //      }
-      //
-      //      if (heaterState == HEAT_STATE_LOWER_HYS)
-      //      {
-      //        tempThreshold =  setTemp;
-      //      }
-      //      else
-      //      {
-      //        tempThreshold = setTemp - HYSTERESIS;
-      //      }
-      //
-      //      if (curTemp < tempThreshold)
-      //      {
-      //        heaterOn();
-      //        //simple protection
-      //        if (lastTemp > curTemp)
-      //          //assume the temperature will be the same or increase with heater on
-      //        {
-      //          faultCounter++;
-      //        }
-      //
-      //        if (curTemp >= HEAT_FAULT_HIGH_TEMP)
-      //        {
-      //          faultMax = HEAT_MAX_FAULT_COUNT_HIGH;
-      //        }
-      //        else if (curTemp >= HEAT_FAULT_MID_TEMP)
-      //        {
-      //          faultMax = HEAT_MAX_FAULT_COUNT_MID;
-      //        }
-      //        else if (curTemp >= HEAT_FAULT_LOW_TEMP)
-      //        {
-      //          faultMax = HEAT_MAX_FAULT_COUNT_LOW;
-      //        }
-      //        else
-      //        {
-      //          faultMax = HEAT_MAX_FAULT_COUNT;
-      //        }
-      //
-      //        if (faultCounter > faultMax)
-      //        {
-      //          Serial.print("temperature fault\n");
-      //          heaterOff();
-      //          errFlag |= ERR_FLAG_TEMP;
-      //          sysState = STATE_ERROR;
-      //        }
-      //        lastTemp = curTemp;
-      //      }
-      //      else
-      //      {
-      //        heaterOff();
-      //        faultCounter = 0;
-      //      }
+      if (setting_mode == SET_MODE_PID)
+      {
+        heaterPID.Compute();
+//        Serial.print(heaterPWM);
+//        Serial.print("\n");
+        heaterOn();
+      }
+      else
+      {
+        if (curTemp > setTemp)
+        {
+          heaterState = HEAT_STATE_UPPER_HYS;
+        }
+
+        if (curTemp < setTemp - setting_Hysteresis)
+        {
+          heaterState = HEAT_STATE_LOWER_HYS;
+        }
+
+        if (heaterState == HEAT_STATE_LOWER_HYS)
+        {
+          tempThreshold =  setTemp;
+        }
+        else
+        {
+          tempThreshold = setTemp - setting_Hysteresis;
+        }
+
+        if (curTemp < tempThreshold)
+        {
+          heaterOn();
+          //simple protection
+          if (lastTemp > curTemp)
+            //assume the temperature will be the same or increase with heater on
+          {
+            faultCounter++;
+          }
+
+          if (curTemp >= HEAT_FAULT_HIGH_TEMP)
+          {
+            faultMax = HEAT_MAX_FAULT_COUNT_HIGH;
+          }
+          else if (curTemp >= HEAT_FAULT_MID_TEMP)
+          {
+            faultMax = HEAT_MAX_FAULT_COUNT_MID;
+          }
+          else if (curTemp >= HEAT_FAULT_LOW_TEMP)
+          {
+            faultMax = HEAT_MAX_FAULT_COUNT_LOW;
+          }
+          else
+          {
+            faultMax = HEAT_MAX_FAULT_COUNT;
+          }
+
+          if (faultCounter > faultMax)
+          {
+            Serial.print("temperature fault\n");
+            heaterOff();
+            errFlag |= ERR_FLAG_TEMP;
+            sysState = STATE_ERROR;
+          }
+          lastTemp = curTemp;
+        }
+        else
+        {
+          heaterOff();
+          faultCounter = 0;
+        }
+      }
     }
     else
     {
@@ -420,6 +458,45 @@ void heaterHandler(void)
     }
   }
 }
+
+struct settings_str {
+  char name[4];
+  float *value;
+  uint8_t dp;
+  float minimum;
+  float maximum;
+  uint8_t eepromAddr;
+  float defaultVal;
+};
+
+
+struct settings_str settings[] = {
+  {"-C-", (float*)&setting_mode, 0, 0, 1, EEPROM_ADR_SETMODE, SET_MODE_PID}, //control mode
+  {"-P-", (float*)&setting_kp, 1, 0, 99.9, EEPROM_ADR_PID_P, PID_P},
+  {"-I-", (float*)&setting_ki, 1, 0, 99.9, EEPROM_ADR_PID_I, PID_I},
+  {"-D-", (float*)&setting_kd, 1, 0, 99.9, EEPROM_ADR_PID_D, PID_D},
+  {"-H-", (float*)&setting_Hysteresis, 0, 0, 999, EEPROM_ADR_HYSTERESIS, HYSTERESIS},
+};
+
+void getSetting(void)
+{
+  uint8_t n;
+  float temp;
+  for (n = 0; n <  sizeof(settings) / sizeof(settings[0]) ; n++)
+  {
+
+    EEPROM.get(settings[n].eepromAddr, temp );
+    if (isnan(temp))
+    {
+      *settings[n].value = settings[n].defaultVal; //init temp setting
+    }
+    else
+    {
+      *settings[n].value = temp;
+    }
+  }
+}
+
 
 void setup(void) {
   byte numDigits = SETTING_7SEG_NUM_DIG;
@@ -450,6 +527,9 @@ void setup(void) {
     setTemp = f;
   }
 
+  getSetting();
+  heaterPID.SetTunings(setting_kp, setting_ki, setting_kd);
+
   setTime = 0; //init timer setting to infinity
   heatStartTime = 0;
   errFlag = 0;
@@ -472,6 +552,135 @@ void setup(void) {
 
 }
 
+#define SETUP_STATE_INIT     0
+#define SETUP_STATE_SELECT   1
+#define SETUP_STATE_ADJUST   2
+#define SETUP_STATE_SAVE     3
+#define SETUP_STATE_EXIT     4
+uint8_t setupState = SETUP_STATE_INIT;
+
+
+/***
+   function to change the setting of the controller
+*/
+void setting_handler(uint8_t encoderFlag)
+{
+  static uint8_t settingID = 0;
+  if (sysState == STATE_SETTING)
+  {
+    switch (setupState) {
+      case SETUP_STATE_INIT:
+        {
+          sevseg.setChars("SET");
+          if (encoderFlag == ENC_BTN_CLICKED)
+          {
+            setupState = SETUP_STATE_SELECT;
+          }
+          if ((encoderFlag == ENC_CCW) || (encoderFlag == ENC_CW))
+          {
+            Serial.print("state: SETUP_STATE_INIT -> STATE_OFF\n");
+            reset_IdleTimeout();
+            sysState = STATE_OFF;
+          }
+        }
+        break;
+
+      case SETUP_STATE_SELECT:
+        {
+          if (encoderFlag == ENC_CW)
+          {
+            settingID++;
+            if (settingID >= sizeof(settings) / sizeof(settings[0]))
+            {
+              settingID = 0;
+            }
+          }
+
+          if (encoderFlag == ENC_CCW)
+          {
+            if (settingID <= 0)
+            {
+              settingID = sizeof(settings) / sizeof(settings[0]) - 1;
+            }
+            else
+            {
+              settingID--;
+            }
+          }
+
+          if (encoderFlag == ENC_BTN_HELD)
+          {
+            Serial.print("state: SETUP_STATE_SELECT -> STATE_OFF\n");
+            reset_IdleTimeout();
+            sysState = STATE_OFF;
+          }
+
+          sevseg.setChars(settings[settingID].name);
+
+          if (encoderFlag == ENC_BTN_CLICKED) //select
+          {
+            setupState = SETUP_STATE_ADJUST;
+          }
+
+        }
+        break;
+
+      case SETUP_STATE_ADJUST:
+        {
+          if (encoderFlag == ENC_CW)
+          {
+            *settings[settingID].value = *settings[settingID].value + 1 * pow(10, -settings[settingID].dp);
+            if (*settings[settingID].value >= settings[settingID].maximum)
+            {
+              *settings[settingID].value = settings[settingID].maximum;
+            }
+            sevseg.setNumber(*settings[settingID].value, settings[settingID].dp);
+          }
+
+          if (encoderFlag == ENC_CCW)
+          {
+            *settings[settingID].value = *settings[settingID].value - 1 * pow(10, -settings[settingID].dp);
+            if (*settings[settingID].value < settings[settingID].minimum)
+            {
+              *settings[settingID].value = settings[settingID].minimum;
+            }
+            sevseg.setNumber(*settings[settingID].value, settings[settingID].dp);
+          }
+
+
+          if (encoderFlag == ENC_BTN_HELD)
+          {
+            Serial.print("state: SETUP_STATE_SELECT -> STATE_OFF\n");
+            reset_IdleTimeout();
+            sysState = STATE_OFF;
+          }
+
+          if (encoderFlag == ENC_BTN_CLICKED)
+          {
+            EEPROM.put(settings[settingID].eepromAddr, *settings[settingID].value);
+            heaterPID.SetTunings(setting_kp, setting_ki, setting_kd);
+            setupState = SETUP_STATE_SELECT;
+          }
+
+          if (blinkTimeout < millis())
+          {
+            blinkTimeout = millis() + SETTING_7SEG_BLINK_TIME;
+            blinkState++;
+            if (blinkState & 1)
+            {
+              sevseg.setNumber(*settings[settingID].value, settings[settingID].dp);
+            }
+            else
+            {
+              sevseg.blank();
+            }
+          }
+
+        }
+        break;
+    }
+  }
+}
 
 //main loop
 void loop(void) {
@@ -557,20 +766,21 @@ void loop(void) {
         switch (encoderFlag)
         {
           case ENC_CW:
-            //            {
-            //              if (sleep == true)
-            //              {
-            //                sleep = false;
-            //              }
-            //              else
-            //              {
-            //                heaterState = HEAT_STATE_LOWER_HYS;
-            //                sysState = STATE_RUN_TEMP;
-            //                Serial.print("state: STATE_OFF -> STATE_RUN_TEMP\n");
-            //              }
-            //            }
-            break;
           case ENC_CCW:
+            {
+              if (sleep == true)
+              {
+                sleep = false;
+              }
+              else
+              {
+                //                heaterState = HEAT_STATE_LOWER_HYS;
+                //                sysState = STATE_RUN_TEMP;
+                sysState = STATE_SETTING;
+                setupState =  SETUP_STATE_INIT;
+                Serial.print("state: STATE_OFF -> STATE_SETTING\n");
+              }
+            }
             break;
 
           case ENC_BTN_CLICKED:
@@ -629,6 +839,13 @@ void loop(void) {
             }
             break;
         }
+      }
+      break;
+
+
+    case STATE_SETTING:
+      {
+        setting_handler(encoderFlag);
       }
       break;
 
@@ -753,10 +970,10 @@ void loop(void) {
             {
               sevseg.setNumber((curTime / SECONDS), -1);
             }
-//            else if (curTime < MINUTES * 10) //9 min 60 sec
-//            {
-//              sevseg.setNumber(((curTime / SECONDS) % 60) + ((curTime / SECONDS) / 60) * 100, 2);
-//            }
+            //            else if (curTime < MINUTES * 10) //9 min 60 sec
+            //            {
+            //              sevseg.setNumber(((curTime / SECONDS) % 60) + ((curTime / SECONDS) / 60) * 100, 2);
+            //            }
             else if (curTime < HOURS * 10) //9 hr 60 min
             {
               if (blinkState & 1)
@@ -904,8 +1121,8 @@ void loop(void) {
           case ENC_BTN_CLICKED: //save and run
             {
               Serial.print("state: STATE_SET_TIMER -> STATE_RUN_TEMP\n");
-              tempSetTime/=MINUTES;
-              tempSetTime*=MINUTES;
+              tempSetTime /= MINUTES;
+              tempSetTime *= MINUTES;
               setTime = tempSetTime;
               heatStartTime = millis();
               sysState = STATE_RUN_TIMER;

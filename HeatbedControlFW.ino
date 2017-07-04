@@ -32,9 +32,9 @@
 #define EEPROM_ADR_HYSTERESIS     0x18
 
 //ENCODER SETTING
-#define SETTING_ENCODER_STEP      (2)
-#define SETTING_ENCODER_A_PIN     (A2)
-#define SETTING_ENCODER_B_PIN     (A3)
+#define SETTING_ENCODER_STEP      (4)
+#define SETTING_ENCODER_A_PIN     (A3)
+#define SETTING_ENCODER_B_PIN     (A2)
 #define SETTING_ENCODER_BTN_PIN   (A1)
 
 //SEGMENT DISPLAY SETTING
@@ -57,17 +57,17 @@
 
 
 //THERMISTER
-#define SETTING_SENSOR_PIN       (A7)
+#define SETTING_SENSOR_PIN       (A6)
 #define SETTING_MAX_TEMP         (110)
 #define SETTING_MIN_TEMP         (0)
 
 //HEATER
-#define SETTING_HEATER_PIN       (A0)
-#define SETTING_AUX_PIN          (A6)
+#define SETTING_STATUS_PIN       (A0)
+#define SETTING_AUX_PIN          (A7)
 #define SETTING_PWM_PIN          (11)
 
 //STATUS LED
-#define SETTING_STATUS_PIN             (13)
+#define SETTING_HEATLED_PIN             (13)
 
 //SYSTEM STATE
 #define STATE_INIT                  (0)
@@ -114,8 +114,8 @@
 
 
 //setting
-#define SET_MODE_PID        (0)
-#define SET_MODE_BITBANG    (1)
+#define SET_MODE_PID        (1)
+#define SET_MODE_BITBANG    (0)
 
 //UNITS
 #define UNIT_CELSIUS    (0)
@@ -135,6 +135,7 @@ char TXT_OFF[]  = "OFF";
 char TXT_ON[]  = " ON";
 char TXT_DISABLE[]  = "---";
 char TXT_FAB[]  = "FAB";
+char TXT_SET[] = "SET";
 
 ////////////////////////////////////////////////
 SevSeg sevseg; //Instantiate a seven segment controller object
@@ -231,7 +232,7 @@ uint8_t encoderHandler(void)
 
 
 // which analog pin to connect
-#define THERMISTORPIN       A7
+#define THERMISTORPIN       SETTING_SENSOR_PIN
 // resistance at 25 degrees C
 #define THERMISTORNOMINAL   100000
 // temp. for nominal resistance (almost always 25 C)
@@ -270,6 +271,7 @@ void temperatureHandler(void)
         if (sampleTimeout < millis())
         {
           samples[sampleCount] = analogRead(THERMISTORPIN);
+          //          Serial.println(samples[sampleCount]);
           sampleCount++;
           if (sampleCount >= NUMSAMPLES)
           {
@@ -309,8 +311,8 @@ void temperatureHandler(void)
         curTemp = steinhart;
         tempState = TEMP_STATE_INIT;
 
-        //        Serial.print("temp =  ");
-        //        Serial.println(steinhart);
+        //                Serial.print("temp =  ");
+        //                Serial.println(steinhart);
       }
       break;
   }
@@ -318,7 +320,6 @@ void temperatureHandler(void)
 
 void heaterOff(void)
 {
-  digitalWrite(SETTING_HEATER_PIN, LOW);
   digitalWrite(SETTING_AUX_PIN, LOW);
   if (setting_mode == SET_MODE_PID)
   {
@@ -328,23 +329,31 @@ void heaterOff(void)
   {
     digitalWrite(SETTING_PWM_PIN, LOW);
   }
-  digitalWrite(SETTING_STATUS_PIN, LOW);
+  digitalWrite(SETTING_HEATLED_PIN, LOW);
 }
 
 void heaterOn(void)
 {
-  digitalWrite(SETTING_HEATER_PIN, HIGH);
   digitalWrite(SETTING_AUX_PIN, HIGH);
   if (setting_mode == SET_MODE_PID)
   {
     analogWrite(SETTING_PWM_PIN, heaterPWM);
-  } 
+    if(heaterPWM > 0)
+    {
+      digitalWrite(SETTING_HEATLED_PIN, HIGH);
+    }
+    else
+    {
+      digitalWrite(SETTING_HEATLED_PIN, LOW);
+    }
+  }
   else
   {
     digitalWrite(SETTING_PWM_PIN, HIGH);
+    digitalWrite(SETTING_HEATLED_PIN, HIGH);
   }
 
-  digitalWrite(SETTING_STATUS_PIN, HIGH);
+  
 }
 
 void heaterHandler(void)
@@ -380,11 +389,13 @@ void heaterHandler(void)
   {
     if (heaterEnable)
     {
+      digitalWrite(SETTING_STATUS_PIN, HIGH);
+
       if (setting_mode == SET_MODE_PID)
       {
         heaterPID.Compute();
-//        Serial.print(heaterPWM);
-//        Serial.print("\n");
+        //        Serial.print(heaterPWM);
+        //        Serial.print("\n");
         heaterOn();
       }
       else
@@ -453,6 +464,8 @@ void heaterHandler(void)
     }
     else
     {
+      digitalWrite(SETTING_STATUS_PIN, LOW);
+
       heaterOff();
       faultCounter = 0;
     }
@@ -471,11 +484,11 @@ struct settings_str {
 
 
 struct settings_str settings[] = {
-  {"-C-", (float*)&setting_mode, 0, 0, 1, EEPROM_ADR_SETMODE, SET_MODE_PID}, //control mode
+  {"PID", (float*)&setting_mode, 0, 0, 1, EEPROM_ADR_SETMODE, SET_MODE_PID}, //control mode
   {"-P-", (float*)&setting_kp, 1, 0, 99.9, EEPROM_ADR_PID_P, PID_P},
   {"-I-", (float*)&setting_ki, 1, 0, 99.9, EEPROM_ADR_PID_I, PID_I},
   {"-D-", (float*)&setting_kd, 1, 0, 99.9, EEPROM_ADR_PID_D, PID_D},
-  {"-H-", (float*)&setting_Hysteresis, 0, 0, 999, EEPROM_ADR_HYSTERESIS, HYSTERESIS},
+  {"HYS", (float*)&setting_Hysteresis, 0, 0, 999, EEPROM_ADR_HYSTERESIS, HYSTERESIS},
 };
 
 void getSetting(void)
@@ -488,12 +501,23 @@ void getSetting(void)
     EEPROM.get(settings[n].eepromAddr, temp );
     if (isnan(temp))
     {
+      EEPROM.put(settings[n].eepromAddr, *settings[n].value);
       *settings[n].value = settings[n].defaultVal; //init temp setting
     }
     else
     {
       *settings[n].value = temp;
     }
+  }
+}
+
+void resetDefault(void)
+{
+  uint8_t n;
+  EEPROM.put(EEPROM_ADR_FWVERSION, (float)(FIRMWARE_VERSION_MAJOR + (FIRMWARE_VERSION_MINOR / 100)));
+  for (n = 0; n <  sizeof(settings) / sizeof(settings[0]) ; n++)
+  {
+    EEPROM.put(settings[n].eepromAddr, *settings[n].value);
   }
 }
 
@@ -508,7 +532,7 @@ void setup(void) {
   bool leadingZeros = true; // Use 'true' if you'd like to keep the leading zeros
   Serial.begin(19200);
   float f;
-
+  analogReference(EXTERNAL);
   heaterPID.SetMode(AUTOMATIC);
 
   //encoder
@@ -516,6 +540,21 @@ void setup(void) {
   encoder->setAccelerationEnabled(true);
   Timer1.initialize(1000);
   Timer1.attachInterrupt(timerIsr);
+
+
+  EEPROM.get(EEPROM_ADR_FWVERSION, f );
+  if (isnan(f))
+  {
+    Serial.print("cannot read eeprom reset default\n");
+    resetDefault();
+  }
+  else
+  {
+    if (f != (float)(FIRMWARE_VERSION_MAJOR + (FIRMWARE_VERSION_MINOR / 100)))
+    {
+      resetDefault();
+    }
+  }
 
   EEPROM.get(EEPROM_ADR_SETTEMP, f );
   if (isnan(f))
@@ -541,14 +580,16 @@ void setup(void) {
   sevseg.setBrightness(SETTING_7SEG_BRIGHTNESS);
 
   //heat
-  pinMode(SETTING_HEATER_PIN, OUTPUT);
-  //  digitalWrite(SETTING_HEATER_PIN, LOW);
+
+  pinMode(SETTING_PWM_PIN, OUTPUT);
+  pinMode(SETTING_STATUS_PIN, OUTPUT);
+  //  digitalWrite(SETTING_STATUS_PIN, LOW);
 
   pinMode(SETTING_AUX_PIN, OUTPUT);
   //  digitalWrite(SETTING_AUX_PIN, LOW);
   //status
-  pinMode(SETTING_STATUS_PIN, OUTPUT);
-  //  digitalWrite(SETTING_STATUS_PIN, LOW);
+  pinMode(SETTING_HEATLED_PIN, OUTPUT);
+  //  digitalWrite(SETTING_HEATLED_PIN, LOW);
 
 }
 
@@ -571,7 +612,7 @@ void setting_handler(uint8_t encoderFlag)
     switch (setupState) {
       case SETUP_STATE_INIT:
         {
-          sevseg.setChars("SET");
+          sevseg.setChars(TXT_SET);
           if (encoderFlag == ENC_BTN_CLICKED)
           {
             setupState = SETUP_STATE_SELECT;
@@ -579,6 +620,7 @@ void setting_handler(uint8_t encoderFlag)
           if ((encoderFlag == ENC_CCW) || (encoderFlag == ENC_CW))
           {
             Serial.print("state: SETUP_STATE_INIT -> STATE_OFF\n");
+            sevseg.setChars(TXT_OFF);
             reset_IdleTimeout();
             sysState = STATE_OFF;
           }
@@ -779,6 +821,7 @@ void loop(void) {
                 sysState = STATE_SETTING;
                 setupState =  SETUP_STATE_INIT;
                 Serial.print("state: STATE_OFF -> STATE_SETTING\n");
+                sevseg.setChars(TXT_SET);
               }
             }
             break;

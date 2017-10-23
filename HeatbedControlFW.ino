@@ -20,7 +20,7 @@
 */
 //firmware Version
 #define FIRMWARE_VERSION_MAJOR         1
-#define FIRMWARE_VERSION_MINOR         0
+#define FIRMWARE_VERSION_MINOR         1
 
 //EEPROM ADDRESS
 #define EEPROM_ADR_FWVERSION      0x00
@@ -30,6 +30,8 @@
 #define EEPROM_ADR_PID_I          0x10
 #define EEPROM_ADR_PID_D          0x14
 #define EEPROM_ADR_HYSTERESIS     0x18
+#define EEPROM_ADR_HEAT_TIMEOUT   0x1C
+#define EEPROM_ADR_NTC_B            0x20
 
 //ENCODER SETTING
 #define SETTING_ENCODER_STEP      (4)
@@ -111,12 +113,6 @@
 #define PID_I     0.1
 #define PID_D     1
 
-
-
-//setting
-#define SET_MODE_PID        (1)
-#define SET_MODE_BITBANG    (0)
-
 //UNITS
 #define UNIT_CELSIUS    (0)
 #define UNIT_FARENHEIT  (1)
@@ -124,6 +120,13 @@
 #define SECONDS (1000)
 #define MINUTES (60000)
 #define HOURS (3600000)
+
+//setting
+#define SET_MODE_PID        (1)
+#define SET_MODE_BITBANG    (0)
+
+#define SET_HEAT_TIMEOUT    (10)
+#define SET_NTC_B    (395)
 
 //ERR
 #define ERR_FLAG_UNKNOWN  (0)
@@ -151,12 +154,15 @@ float curTemp; //current Temperature
 uint32_t curTime;
 int8_t encoderValue; //-1, 0, +1
 uint32_t idleTimeout;
-uint8_t blinkState;
+uint8_t blinkState = 0;
 uint32_t blinkTimeout;
 uint8_t errFlag;
 float heaterPWM;
 float setting_mode = SET_MODE_PID;
 float setting_Hysteresis = HYSTERESIS;
+float setting_HeatTimeout = SET_HEAT_TIMEOUT;
+float setting_NTC_B = SET_NTC_B;
+uint32_t heatErrStartTimer = 0;
 
 double setting_kp = PID_P, setting_ki = PID_I, setting_kd = PID_D;
 //Specify the links and initial tuning parameters
@@ -172,6 +178,7 @@ void timerIsr(void) {
 
 void reset_IdleTimeout(void)
 {
+  blinkState = 1;
   idleTimeout = millis() + SETTING_7SEG_IDLE_TIME;
 }
 
@@ -303,7 +310,7 @@ void temperatureHandler(void)
         float steinhart;
         steinhart = average / THERMISTORNOMINAL;     // (R/Ro)
         steinhart = log(steinhart);                  // ln(R/Ro)
-        steinhart /= BCOEFFICIENT;                   // 1/B * ln(R/Ro)
+        steinhart /= setting_NTC_B*10;                   // 1/B * ln(R/Ro)
         steinhart += 1.0 / (TEMPERATURENOMINAL + 273.15); // + (1/To)
         steinhart = 1.0 / steinhart;                 // Invert
         steinhart -= 273.15;                         // convert to C
@@ -359,9 +366,6 @@ void heaterOn(void)
 void heaterHandler(void)
 {
   float tempThreshold;
-  static float lastTemp;
-  static uint8_t faultCounter;
-  uint16_t faultMax;
 
   if ((sysState == STATE_INIT) || (sysState == STATE_ERROR))
   {
@@ -389,8 +393,29 @@ void heaterHandler(void)
   {
     if (heaterEnable)
     {
-      digitalWrite(SETTING_STATUS_PIN, HIGH);
-
+        if (curTemp >= setTemp)
+        {
+          heatErrStartTimer = 0;
+          digitalWrite(SETTING_STATUS_PIN, HIGH);
+        }
+        else if (curTemp < setTemp - setting_Hysteresis)
+        {
+          if((heatErrStartTimer != 0) && ((heatErrStartTimer + (setting_HeatTimeout * MINUTES)) < millis()))
+          {
+            Serial.print("temperature fault\n");
+            heaterOff();
+            errFlag |= ERR_FLAG_TEMP;
+            sysState = STATE_ERROR;
+          }
+          digitalWrite(SETTING_STATUS_PIN, LOW);
+        }
+        else
+        {
+          if(heatErrStartTimer == 0)
+          {
+            heatErrStartTimer = millis();
+          }
+        }
       if (setting_mode == SET_MODE_PID)
       {
         heaterPID.Compute();
@@ -400,12 +425,11 @@ void heaterHandler(void)
       }
       else
       {
-        if (curTemp > setTemp)
+        if (curTemp >= setTemp)
         {
           heaterState = HEAT_STATE_UPPER_HYS;
         }
-
-        if (curTemp < setTemp - setting_Hysteresis)
+        else if (curTemp < setTemp - setting_Hysteresis)
         {
           heaterState = HEAT_STATE_LOWER_HYS;
         }
@@ -422,52 +446,17 @@ void heaterHandler(void)
         if (curTemp < tempThreshold)
         {
           heaterOn();
-          //simple protection
-          if (lastTemp > curTemp)
-            //assume the temperature will be the same or increase with heater on
-          {
-            faultCounter++;
-          }
-
-          if (curTemp >= HEAT_FAULT_HIGH_TEMP)
-          {
-            faultMax = HEAT_MAX_FAULT_COUNT_HIGH;
-          }
-          else if (curTemp >= HEAT_FAULT_MID_TEMP)
-          {
-            faultMax = HEAT_MAX_FAULT_COUNT_MID;
-          }
-          else if (curTemp >= HEAT_FAULT_LOW_TEMP)
-          {
-            faultMax = HEAT_MAX_FAULT_COUNT_LOW;
-          }
-          else
-          {
-            faultMax = HEAT_MAX_FAULT_COUNT;
-          }
-
-          if (faultCounter > faultMax)
-          {
-            Serial.print("temperature fault\n");
-            heaterOff();
-            errFlag |= ERR_FLAG_TEMP;
-            sysState = STATE_ERROR;
-          }
-          lastTemp = curTemp;
         }
         else
         {
           heaterOff();
-          faultCounter = 0;
         }
       }
     }
     else
     {
       digitalWrite(SETTING_STATUS_PIN, LOW);
-
       heaterOff();
-      faultCounter = 0;
     }
   }
 }
@@ -489,6 +478,8 @@ struct settings_str settings[] = {
   {"-I-", (float*)&setting_ki, 1, 0, 99.9, EEPROM_ADR_PID_I, PID_I},
   {"-D-", (float*)&setting_kd, 1, 0, 99.9, EEPROM_ADR_PID_D, PID_D},
   {"HYS", (float*)&setting_Hysteresis, 0, 0, 999, EEPROM_ADR_HYSTERESIS, HYSTERESIS},
+  {"-T-", (float*)&setting_HeatTimeout, 1, 0, 99.9, EEPROM_ADR_HEAT_TIMEOUT, SET_HEAT_TIMEOUT},
+  {"-B-", (float*)&setting_NTC_B, 0, 0, 999, EEPROM_ADR_NTC_B, SET_NTC_B},
 };
 
 void getSetting(void)
@@ -851,13 +842,13 @@ void loop(void) {
 
           default:
             {
-              if (idleTimeout < millis())
-              {
-                sevseg.blank();
-                sleep = true;
-              }
-              else
-              {
+//              if (idleTimeout < millis())
+//              {
+//                sevseg.blank();
+//                sleep = true;
+//              }
+//              else
+//              {
                 if (blinkTimeout < millis())
                 {
                   if (blinkState & 1)
@@ -879,7 +870,7 @@ void loop(void) {
                   blinkState++;
                 }
               }
-            }
+//            }
             break;
         }
       }
@@ -1085,6 +1076,7 @@ void loop(void) {
               heaterState = HEAT_STATE_LOWER_HYS;
               sysState = STATE_RUN_TEMP;
               setTemp = tempSetTemp;
+              heatErrStartTimer =  millis();
               EEPROM.put(EEPROM_ADR_SETTEMP, setTemp);
             }
             break;

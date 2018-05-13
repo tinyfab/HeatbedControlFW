@@ -1,27 +1,34 @@
 tinyFab Heatbed Controller
 
 Description
-tinyFab Heatbed provide thermal control for the cetus/ up mini or other 3d printer
+tinyFab Heatbed provide thermal control for the cetus3D / up mini or other 3d printer
 
-The controller control a companion driver board which drive the power to the heatbed  
+The controller controls a companion driver board which provides power to the heatbed  
 
 
 Installation instruction
 Connect the 3 wire power source cable from the controller board to the driver board
 Connect the 4 wire power source cable from the controller board to the driver board
 Connect the 2 pin sensor port to a thermister
-for Cetus or up mini Connect the flat ribbon cable (FFC) to the mainboard of the 3d printer, this also provide power to the controller.
-for other printer only external power is available and must connect J5 and J10 to provide power to the controller
+
+
+for Cetus3D or up mini there are two ways to provide power to the driver Board:
+
+Option 1 (heatbed temperature max 60°C): Connect the flat ribbon cable (FFC) to the mainboard of the 3d printer, this provides power to the controller. 
+
+Option 2 (Heatbed temperature max 110°C: Power the driver board with a external power supply. In this case you have to bridge Jumper J5 and J10 on the driver board to provide power to the controller.
+
+For other printers only external power (Option 2) is available.
 
 Using the controller
-When power on the Controller will set the driver to off state
+When the controller is powered on the driver is set to off state.
 
 OFF -> short press -> TEMPERATURE SET -> short press -> RUN -> long press -> OFF
 OFF -> turn dial -> SETTINGS -> 
 RUN -> turn dial -> TIMER SET -> short press -> RUN
 
-long press will turn off heatbed in RUN mode
-long press will return to upper level in SETTINGS
+a long press will turn off heatbed in RUN mode
+a long press will return to upper level in SETTINGS
 
 
 Settings    default     Description
@@ -42,7 +49,7 @@ E02  Temperature raise error (max allow time reached to set temperature)
 Troubleshoot
 E01  check temperature sensor connection
 E02  make sure you give enough time for the heatbed to heat up to your set temperature and it has not reached the capability of the heatbed.
-
+driver switches off at around 60°C (+-10°C) when powered by the flat ribbon cable -> max temperature is reached. Wait a few minutes until heatbed is cooled down
    
 
 Change Log

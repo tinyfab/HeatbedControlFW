@@ -12,8 +12,9 @@ Connect the 4 wire power source cable from the controller board to the driver bo
 Connect the 2 pin sensor port to a thermister
 
 
-For Cetus3D or up mini connect the short FFC to the driver board CH1 input, this will supply power (19V) from the mainboard through the driver board to the controller.
-For other printer DO NOT use the FFC cable. Use external input wires and link J5 and J10 on the driver board to divert power to the controller
+For Cetus3D or up mini, connect the short FFC to the driver board CH1 input, this will supply power (19V) from the mainboard through the driver board to the controller.
+
+For other printer, DO NOT use the FFC cable. Use external input wires and link J5 and J10 on the driver board to divert power to the controller
 
 There are two option for connecting cetus3D and up mini 
 For other printers only external power (Option 2) is available. 
